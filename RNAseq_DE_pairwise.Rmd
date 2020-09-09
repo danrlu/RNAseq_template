@@ -1,0 +1,88 @@
+---
+title: "RNAseq_DE_pairwise_comparison"
+output: html_document
+date: "11/6/17"
+author: Dan Lu
+---
+
+Differential expression analysis for pairs of conditions.
+
+```{r}
+suppressWarnings(suppressMessages(library(DESeq2)))
+suppressWarnings(suppressMessages(library(tidyverse)))
+suppressWarnings(suppressMessages(library(magrittr)))
+suppressWarnings(suppressMessages(library("biomaRt")))
+
+options(tibble.width = Inf)
+options(scipen=999)
+```
+
+
+Differential expression analysis
+```{r}
+# if want to use an existing sample table
+# sampleTable_exist <- read.csv('sampleTable.txt')
+# dds <- DESeqDataSetFromHTSeqCount(sampleTable=sampleTable_exist, design=~condition)
+# sample_name=''
+
+dds <- DESeqDataSetFromHTSeqCount(sampleTable=as.data.frame(sampleTable), design=~condition)
+
+dds <- dds[ rowSums(counts(dds)) > 10, ]  # filter out genes with counts < 10
+
+dds$condition <- relevel(dds$condition, ref="control") # set the level to be compared with
+
+dds <- DESeq(dds)
+res <- results(dds)
+resOrdered <- res[order(res$padj),]
+
+write.table(resOrdered,file=paste0("DE_",sample_name,"_results_all.txt"),sep = "\t",col.names=NA)
+# col.names=NA is necessary otherwise 1st column will not have a header and format is a mess
+
+write.table(counts(dds,normalized=TRUE),file=paste0("DE_",sample_name,"_normalized_counts.txt"),sep = "\t",col.names=NA)
+
+```
+
+
+Scatter plot between samples to see how good replicates are
+```{r fig.asp = 1}
+count_log=counts(dds,normalized=TRUE)+1
+
+panel.cor <- function(x, y){
+    usr <- par("usr"); on.exit(par(usr))
+    par(usr = c(0, 1, 0, 1),xlog = FALSE, ylog = FALSE)
+    r <- round(cor(log(x,2), log(y,2)), digits=3)
+    txt <- paste0("R = ", r)
+    cex.cor <- 0.8/strwidth(txt)
+    text(0.5, 0.5, txt)
+}
+
+upper.panel<-function(x, y){
+  points(x,y, pch=20, lwd=0.2, col=rgb(0, 0, 0, 0.2))
+}
+pairs(count_log[,1:4], lower.panel = panel.cor, 
+      upper.panel = upper.panel, log = "xy")
+
+```
+
+
+
+Valcano plot
+```{r}
+DE_table=as.data.frame(resOrdered)
+
+DE_table$threshold = as.factor(abs(DE_table$log2FoldChange) > 1 & DE_table$padj < 0.01)
+ 
+table(DE_table$threshold)
+
+title="log2FC > 1 and padj < 0.01 is highlighted"
+
+ggplot(data=DE_table, aes(x=log2FoldChange, y=-log10(padj), colour=threshold)) + geom_point(alpha=0.2, size=1) + theme(legend.position = "none",panel.background = element_rect(fill = NA),panel.border=element_rect(colour = "grey40", fill=NA, size = 1)) + xlim(c(-10, 10)) + ylim(c(0, 10)) + xlab("log2(fold change)") + ylab("-log10(adjusted p-value)") + ggtitle(title)
+
+```
+
+
+
+```{r}
+sessionInfo()
+```
+

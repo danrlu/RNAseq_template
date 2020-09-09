@@ -1,0 +1,87 @@
+---
+title: "RNAseq_remove_rRNA_mito_reads"
+author: "Dan Lu"
+date: "11/11/2017"
+output: html_document
+---
+
+```{r}
+suppressWarnings(suppressMessages(library(dplyr)))
+suppressWarnings(suppressMessages(library(magrittr)))
+
+options(tibble.width = Inf)
+options(scipen=999)
+```
+
+
+Load lists of rRNA and mitochondria 
+```{r}
+pig_rRNA <- read.delim("pig_rRNA.bed", header=FALSE, stringsAsFactors=FALSE)
+
+pig_mito <- read.delim("pig_mito.bed", header=FALSE, stringsAsFactors=FALSE)
+
+rRNA_list=dplyr::select(pig_rRNA, V4)%>%dplyr::rename(V1=V4)
+mito_list=dplyr::select(pig_mito, V4)%>%dplyr::rename(V1=V4)
+
+# a list of genes that counts > 100000 is not removed from the count files, but will be included in the stats table
+others_list=read.delim("high_list.txt", header=FALSE, stringsAsFactors=FALSE)
+```
+
+Create count file list, and create dataframe to hold total counts for each groups of genes
+```{r}
+file_list=list.files(pattern = '.ReadsPerGene\\.out\\.tab\\.srt.')
+
+names(file_list)=substr(file_list,12,15)
+
+stats=data.frame(row.names=c("all","noRMH","rRNA","mito","others"))
+#names(stats)=substr(file_list,12,15) #a=data.frame(col.names=as.list(substr(file_list,12,15)))
+#stats=list()
+```
+
+
+```{r}
+separate_RMH <- function(i) {
+    # load the count files
+    count_file_name=as.character(file_list[[i]])
+    count_file= read.delim(count_file_name, header=FALSE, stringsAsFactors=FALSE)
+    # remove last 4 rows that are not gene counts
+    a=nrow(count_file)-4
+    count_file%<>%slice(1:a)
+    
+
+    # remove rRNA, mito from the count file.
+    count_file_noRM=anti_join(count_file,rRNA_list,by="V1")%>%anti_join(mito_list,by="V1")%>%arrange(V1)
+    count_file_noRM_name=paste0(substr(count_file_name, 1, nchar(count_file_name)-18),"_noRM.txt")
+    write.table(count_file_noRM, count_file_noRM_name, sep="\t", quote=F, col.names=F, row.names=F)
+    
+    
+    # take rRNA counts and put in a separate file for bookkeeping
+    count_file_rRNA=semi_join(count_file,rRNA_list,by="V1")
+    count_file_rRNA_name = paste0(substr(count_file_name, 1, nchar(count_file_name)-18),"_rRNA.txt")
+    write.table(count_file_rRNA, count_file_rRNA_name, sep="\t",  quote=F, col.names=F, row.names=F)
+    
+    # take mito counts
+    count_file_mito=semi_join(count_file,mito_list,by="V1")
+    count_file_mito_name = paste0(substr(count_file_name, 1, nchar(count_file_name)-18),"_mito.txt")
+    write.table(count_file_mito, count_file_mito_name, sep="\t",  quote=F, col.names=F, row.names=F)
+    
+    # take counts of other extremely highly expressed genes
+    count_file_others=semi_join(count_file,others_list,by="V1")
+    count_file_others_name = paste0(substr(count_file_name, 1, nchar(count_file_name)-18),"_others.txt")
+    write.table(count_file_others, count_file_others_name, sep="\t",  quote=F, col.names=F, row.names=F)
+
+    
+    # calculate totatl counts for each groups of gene
+    stats["all",names(file_list)[[i]]]=sum(count_file$V2)
+    stats["noRMH",names(file_list)[[i]]]=sum(count_file_noRM$V2)
+    stats["rRNA",names(file_list)[[i]]]=sum(count_file_rRNA$V2)
+    stats["mito",names(file_list)[[i]]]=sum(count_file_mito$V2)
+    stats["others",names(file_list)[[i]]]=sum(count_file_others$V2)
+    return(stats)
+}
+
+stats=lapply(seq_along(file_list), function(i) separate_RMH(i))
+
+write.table(stats, "stats_on_counts.txt", sep="\t",  quote=F, col.names=T, row.names=T) # the col names is misaligned, fixed in excel
+```
+
